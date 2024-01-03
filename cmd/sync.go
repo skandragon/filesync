@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -23,12 +25,32 @@ Only regular files and directories are supported.`,
 }
 
 func syncRun(cmd *cobra.Command, args []string) error {
-	files, err := walkdir(args[0])
+	ignore := []string{".skan-filesync"}
+	srcFiles, err := walkdir(args[0], ignore)
 	if err != nil {
 		return err
 	}
-	log.Printf("files: %#v", files)
+	log.Printf("src files:")
+	printList(srcFiles)
+
+	dstFiles, err := walkdir(args[1], ignore)
+	if err != nil {
+		return err
+	}
+	log.Printf("dst files:")
+	printList(dstFiles)
+
 	return nil
+}
+
+func printList(l []fileInfo) {
+	for _, f := range l {
+		d := "r"
+		if f.IsDir {
+			d = "d"
+		}
+		log.Printf("%s %s %10d %s", d, f.Perm.String(), f.Size, f.Name)
+	}
 }
 
 type fileInfo struct {
@@ -38,16 +60,24 @@ type fileInfo struct {
 	Perm  os.FileMode
 }
 
-func walkdir(root string) ([]fileInfo, error) {
+func walkdir(root string, ignore []string) ([]fileInfo, error) {
 	ret := []fileInfo{}
 	err := filepath.Walk(root,
 		func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
-			if path != root && (info.IsDir() || info.Mode().IsRegular()) {
+			// make sure the root is a direcory, and otherwise skip it.
+			if path == root {
+				if !info.IsDir() {
+					return fmt.Errorf("%s is not a directory", root)
+				}
+				return nil
+			}
+			name, _ := strings.CutPrefix(path, root+"/")
+			if info.IsDir() || info.Mode().IsRegular() {
 				ret = append(ret, fileInfo{
-					Name:  info.Name(),
+					Name:  name,
 					Size:  info.Size(),
 					IsDir: info.IsDir(),
 					Perm:  info.Mode().Perm(),
